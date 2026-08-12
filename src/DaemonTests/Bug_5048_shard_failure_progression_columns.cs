@@ -70,10 +70,18 @@ public class Bug_5048_shard_failure_progression_columns: DaemonContext
         var database = (MartenDatabase)theStore.Storage.Database;
         await database.EnsureStorageExistsAsync(typeof(IEvent));
 
-        await using var session = theStore.LightweightSession();
-        session.QueueSqlCommand(
-            $"select {theStore.Events.DatabaseSchemaName}.mt_mark_event_progression(?, ?)", TheShard, 10L);
-        await session.SaveChangesAsync();
+        // Run this on its own connection rather than through QueueSqlCommand. `select fn(...)`
+        // returns a one-row result set, and a queued command is a NoDataReturnedCall, so the
+        // batched reader is never advanced past it (#5210). This is arrange, not part of the
+        // unit of work under test.
+        await using var conn = database.CreateConnection();
+        await conn.OpenAsync();
+
+        await conn
+            .CreateCommand($"select {theStore.Events.DatabaseSchemaName}.mt_mark_event_progression(:name, :seq)")
+            .With("name", TheShard)
+            .With("seq", 10L)
+            .ExecuteNonQueryAsync();
     }
 
     private async Task<(object? category, object? sequence, object? eventType, object? tenantId)> readFailureAsync()

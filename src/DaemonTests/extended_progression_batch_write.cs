@@ -98,14 +98,21 @@ public class extended_progression_batch_write: DaemonContext
         var database = (MartenDatabase)theStore.Storage.Database;
         await database.EnsureStorageExistsAsync(typeof(IEvent));
 
-        await using var session = theStore.LightweightSession();
+        // Run this on its own connection rather than through QueueSqlCommand. `select fn(...)`
+        // returns a one-row result set, and a queued command is a NoDataReturnedCall, so the
+        // batched reader is never advanced past it and every later operation in the page reads
+        // the wrong result set (#5210). This is arrange, not part of the unit of work under test.
+        await using var conn = database.CreateConnection();
+        await conn.OpenAsync();
+
         foreach (var shard in new[] { "BatchTelemetryStream:All", "OtherBatchTelemetry:All" })
         {
-            session.QueueSqlCommand(
-                $"select {theStore.Events.DatabaseSchemaName}.mt_mark_event_progression(?, ?)", shard, 10L);
+            await conn
+                .CreateCommand($"select {theStore.Events.DatabaseSchemaName}.mt_mark_event_progression(:name, :seq)")
+                .With("name", shard)
+                .With("seq", 10L)
+                .ExecuteNonQueryAsync();
         }
-
-        await session.SaveChangesAsync();
     }
 
     private static ShardState telemetry(string shard, string status, string? reason = null, int? node = null)

@@ -238,6 +238,19 @@ public interface IDocumentOperations: IQuerySession, IStorageOperations
     ///     Registers a SQL command to be executed with the underlying unit of work as part of the batched command.
     ///     Use "?" placeholders to denote parameter values
     /// </summary>
+    /// <remarks>
+    ///     The SQL must not return a result set. Marten batches every operation in the unit of work into one
+    ///     command and reads their results in order, and a queued command is assumed to contribute nothing to
+    ///     read. A statement that does return rows, <c>select some_function(...)</c> for example, leaves the
+    ///     batched reader one result set behind, and every operation queued after it in the same session then
+    ///     reads the wrong one. Nothing throws; the symptom is a spurious ConcurrencyException or a wrong
+    ///     version on an unrelated document (see marten#5210).
+    ///     <para>
+    ///     Insert, update and delete are safe. To call a function for its side effect, use
+    ///     <c>DO $$ BEGIN PERFORM some_function(...); END $$</c> rather than <c>select</c>, or run it on its
+    ///     own connection outside the session.
+    ///     </para>
+    /// </remarks>
     /// <param name="sql"></param>
     /// <param name="parameterValues"></param>
     void QueueSqlCommand(string sql, params object[] parameterValues);
@@ -246,6 +259,10 @@ public interface IDocumentOperations: IQuerySession, IStorageOperations
     ///     Registers a SQL command to be executed with the underlying unit of work as part of the batched command.
     ///     Use <paramref name="placeholder"/> to specify a character that will be replaced by positional parameters.
     /// </summary>
+    /// <remarks>
+    ///     The SQL must not return a result set. See the other overload for why, and for what to write instead
+    ///     when you need a function's side effect.
+    /// </remarks>
     /// <param name="placeholder"></param>
     /// <param name="sql"></param>
     /// <param name="parameterValues"></param>
